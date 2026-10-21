@@ -1,0 +1,7 @@
+{
+  "uuid": "modular-toolbar@example.com",
+  "name": "Modular Ubuntu Toolbar",
+  "description": "Displays modular monitor data in the GNOME top panel.",
+  "shell-version": ["45", "46", "47", "48", "49", "50"],
+  "version": 4
+}

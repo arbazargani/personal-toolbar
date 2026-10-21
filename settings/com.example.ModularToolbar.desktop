@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Modular Toolbar Settings
+Comment=Manage profiles for the Modular Ubuntu Top-Bar Monitor
+Exec=@HOME@/.local/bin/modular-toolbar-settings
+Icon=preferences-system
+Terminal=false
+Categories=GTK;GNOME;Settings;Utility;
+StartupNotify=true

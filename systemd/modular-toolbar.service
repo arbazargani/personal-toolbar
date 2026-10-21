@@ -1,0 +1,11 @@
+[Unit]
+Description=Modular Ubuntu Toolbar backend
+After=graphical-session.target
+
+[Service]
+ExecStart=%h/.local/bin/modular-toolbar
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

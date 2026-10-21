@@ -1,0 +1,533 @@
+# Modular Ubuntu Top-Bar Monitor — Run Instructions
+
+This file describes how to build, install, start, verify, and uninstall the current application.
+
+The project currently contains:
+
+- A Go backend service.
+- SQLite persistence under the user configuration directory.
+- The `avalai_credit_info` module and polling service.
+- A restricted Unix socket for local IPC.
+- A GNOME Shell extension that displays status text in the top panel.
+- A native GTK 4/libadwaita settings application for profile management.
+- A per-user systemd service for automatic startup.
+
+The native GTK 4/libadwaita settings application manages profiles visually. The installed extension targets GNOME Shell 45–50 (Ubuntu 24.04 and newer).
+
+## 1. Required Ubuntu packages
+
+Install the system dependencies:
+
+```sh
+sudo apt update
+sudo apt install -y golang-go make gnome-shell python3 python3-gi \
+  gir1.2-gtk-4.0 gir1.2-adw-1
+```
+
+Check the Go version:
+
+```sh
+go version
+```
+
+The project targets Go 1.22 or newer. If Ubuntu's packaged Go is older, install a current Go release separately.
+
+No root privileges are required to run the application itself. `sudo` is only used here to install system packages.
+
+## 2. Enter the project
+
+```sh
+cd ~/dev/personal-linux-toolbar-info
+```
+
+If the project is located elsewhere, replace the path accordingly.
+
+## 3. One-command startup
+
+Run the unified installer and launcher:
+
+```sh
+./start.sh
+```
+
+`start.sh` installs missing Ubuntu dependencies when needed, downloads Go dependencies, runs the tests, builds and installs the current app, preserves the existing database, checks stored profiles without exposing API keys, starts the user service, waits for the backend IPC socket, enables the GNOME extension, and prints the service status. A profile is valid only when it has a name, uses the `avalai_credit_info` module, is enabled, and has a non-empty API key. If no valid profile exists, it offers to run `add-profile.sh` automatically.
+
+The application runs in the background through the per-user systemd service. To watch live logs:
+
+```sh
+journalctl --user -u modular-toolbar.service -f
+```
+
+`start.sh` does not delete profiles or API keys. It uses `sudo` only if system packages are missing.
+
+## 4. Download Go dependencies
+
+Run this once, or whenever `go.mod` changes:
+
+```sh
+go mod tidy
+```
+
+The project uses the pure-Go SQLite driver `modernc.org/sqlite`.
+
+## 5. Run tests
+
+```sh
+make test
+```
+
+Equivalent command:
+
+```sh
+go test ./...
+```
+
+A successful run should show passing packages including:
+
+```text
+ok   github.com/example/modular-ubuntu-toolbar/internal/ipc
+ok   github.com/example/modular-ubuntu-toolbar/internal/module
+ok   github.com/example/modular-ubuntu-toolbar/modules/avalai_credit_info
+```
+
+## 6. Build the backend
+
+```sh
+make build
+```
+
+This creates:
+
+```text
+bin/modular-toolbar
+```
+
+Run the backend manually in the foreground:
+
+```sh
+./bin/modular-toolbar
+```
+
+Stop it with `Ctrl+C`.
+
+The backend stores its database at:
+
+```text
+~/.config/modular-toolbar/toolbar.db
+```
+
+The IPC socket is normally created at:
+
+```text
+$XDG_RUNTIME_DIR/modular-toolbar.sock
+```
+
+The socket is restricted to the current user with mode `0600`.
+
+## 7. Install the application for the current user
+
+From the project root:
+
+```sh
+./start.sh
+```
+
+This installs:
+
+```text
+~/.local/bin/modular-toolbar
+~/.local/share/gnome-shell/extensions/modular-toolbar@example.com/
+~/.local/bin/modular-toolbar-settings
+~/.local/share/applications/com.example.ModularToolbar.desktop
+~/.config/systemd/user/modular-toolbar.service
+```
+
+The unified `start.sh` command also installs the application files and enables and starts the per-user systemd service.
+
+No system-wide installation is performed.
+
+## 8. Open the native settings panel
+
+Launch the profile manager:
+
+```sh
+modular-toolbar-settings
+```
+
+It uses native GTK 4/libadwaita controls. Add and edit dialogs use password fields for API keys, existing keys remain hidden unless replaced, and profile changes restart the user backend automatically. The same application is available as `Modular Toolbar Settings` from the desktop application menu and through the panel indicator’s `Manage Profiles…` menu item.
+
+## 9. Enable the GNOME Shell extension
+
+Enable the extension:
+
+```sh
+gnome-extensions enable modular-toolbar@example.com
+```
+
+Check its state:
+
+```sh
+gnome-extensions info modular-toolbar@example.com
+```
+
+List enabled extensions:
+
+```sh
+gnome-extensions list --enabled
+```
+
+The extension should display text directly in the GNOME top panel. It is not implemented as a tray icon or floating window. The GNOME 45–50 implementation registers its `PanelMenu.Button` with `GObject.registerClass` and uses asynchronous Gio socket operations; this is required on GNOME 50 and prevents IPC from blocking the Shell main loop. If GNOME 50 reports `OUT OF DATE` after reinstalling, log out and log back in to reload the shell extension metadata, then run `gnome-extensions info modular-toolbar@example.com` again.
+
+To reload only this extension, use:
+
+```sh
+gnome-extensions disable modular-toolbar@example.com
+gnome-extensions enable modular-toolbar@example.com
+```
+
+On Xorg, `Alt+F2`, then `r`, can reload GNOME Shell. GNOME Shell cannot normally be restarted this way under Wayland; log out and back in instead if disable/enable does not reload the updated files.
+
+## 10. Start and inspect the backend service
+
+The backend should start automatically after installation. The panel extension cannot display live data unless this service is active. Check its status:
+
+```sh
+systemctl --user status modular-toolbar.service
+```
+
+Follow its logs:
+
+```sh
+journalctl --user -u modular-toolbar.service -f
+```
+
+Start it manually through systemd:
+
+```sh
+systemctl --user start modular-toolbar.service
+```
+
+Restart it:
+
+```sh
+systemctl --user restart modular-toolbar.service
+```
+
+Stop it:
+
+```sh
+systemctl --user stop modular-toolbar.service
+```
+
+Check whether the IPC socket exists:
+
+```sh
+ls -l "$XDG_RUNTIME_DIR/modular-toolbar.sock"
+```
+
+Expected permissions are approximately:
+
+```text
+srw-------
+```
+
+## 11. Configure an Avalai profile
+
+The panel intentionally shows `Toolbar: inactive` when the backend has no enabled profiles. You must create at least one enabled profile before Avalai data can appear.
+
+The easiest and safest method is the included interactive helper:
+
+```sh
+./add-profile.sh
+```
+
+It prompts for a display name and hides the API key while typing. It writes the profile to SQLite and restarts the user service. It does not print or log the API key.
+
+If you prefer to use SQLite directly, insert a profile as follows:
+
+Install the client if necessary:
+
+```sh
+sudo apt install -y sqlite3
+```
+
+Create one profile. Replace `YOUR_AVALAI_API_KEY` with the actual key; do not commit the key to Git:
+
+```sh
+sqlite3 "$HOME/.config/modular-toolbar/toolbar.db" <<'SQL'
+INSERT INTO profiles (
+    id,
+    module_id,
+    name,
+    api_key,
+    enabled,
+    last_error
+) VALUES (
+    'personal',
+    'avalai_credit_info',
+    'Personal',
+    'YOUR_AVALAI_API_KEY',
+    1,
+    ''
+);
+SQL
+```
+
+Restart the backend after adding or changing a profile:
+
+```sh
+systemctl --user restart modular-toolbar.service
+```
+
+Multiple profiles can be inserted with different IDs and API keys. For example, use IDs such as `personal` and `work`.
+
+Never put API keys in shell history if avoidable. For interactive use, use a temporary SQLite script file with restrictive permissions and delete it afterward:
+
+```sh
+umask 077
+cat > /tmp/add-toolbar-profile.sql <<'SQL'
+INSERT INTO profiles (id, module_id, name, api_key, enabled, last_error)
+VALUES ('work', 'avalai_credit_info', 'Work', 'YOUR_AVALAI_API_KEY', 1, '');
+SQL
+sqlite3 "$HOME/.config/modular-toolbar/toolbar.db" < /tmp/add-toolbar-profile.sql
+rm -f /tmp/add-toolbar-profile.sql
+systemctl --user restart modular-toolbar.service
+```
+
+## 12. Inspect stored configuration without printing API keys
+
+Do not select the `api_key` column in normal diagnostic commands.
+
+List profiles safely:
+
+```sh
+sqlite3 -header -column "$HOME/.config/modular-toolbar/toolbar.db" \
+  'SELECT id, module_id, name, enabled, last_success, last_error FROM profiles;'
+```
+
+Show application settings:
+
+```sh
+sqlite3 -header -column "$HOME/.config/modular-toolbar/toolbar.db" \
+  'SELECT key, value FROM settings;'
+```
+
+The default settings are:
+
+```text
+refresh_interval  5m
+rotation_interval 8s
+http_timeout      15s
+number_format     %.4f
+```
+
+## 13. Change refresh and rotation intervals
+
+The backend accepts persisted settings. The profile manager covers profile management; advanced timing settings can still be updated with SQLite:
+
+```sh
+sqlite3 "$HOME/.config/modular-toolbar/toolbar.db" <<'SQL'
+INSERT INTO settings (key, value) VALUES ('refresh_interval', '5m')
+ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+
+INSERT INTO settings (key, value) VALUES ('rotation_interval', '8s')
+ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+
+INSERT INTO settings (key, value) VALUES ('http_timeout', '15s')
+ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+SQL
+
+systemctl --user restart modular-toolbar.service
+```
+
+Use Go duration syntax such as `30s`, `5m`, or `1h`.
+
+## 14. Enable or disable a profile
+
+Disable a profile without deleting it:
+
+```sh
+sqlite3 "$HOME/.config/modular-toolbar/toolbar.db" \
+  "UPDATE profiles SET enabled = 0 WHERE id = 'personal';"
+systemctl --user restart modular-toolbar.service
+```
+
+Enable it again:
+
+```sh
+sqlite3 "$HOME/.config/modular-toolbar/toolbar.db" \
+  "UPDATE profiles SET enabled = 1 WHERE id = 'personal';"
+systemctl --user restart modular-toolbar.service
+```
+
+## 15. Remove a profile
+
+The settings application asks for confirmation before deletion. If you prefer the command line, verify the ID first:
+
+```sh
+sqlite3 "$HOME/.config/modular-toolbar/toolbar.db" \
+  'SELECT id, name FROM profiles;'
+```
+
+Then delete the selected profile:
+
+```sh
+sqlite3 "$HOME/.config/modular-toolbar/toolbar.db" \
+  "DELETE FROM profiles WHERE id = 'personal';"
+systemctl --user restart modular-toolbar.service
+```
+
+## 16. Troubleshooting
+
+### Backend is not running
+
+```sh
+systemctl --user status modular-toolbar.service
+journalctl --user -u modular-toolbar.service -n 100 --no-pager
+```
+
+Try rebuilding and reinstalling:
+
+```sh
+./start.sh
+```
+
+### Extension is not visible
+
+Check that the backend is running:
+
+```sh
+systemctl --user is-active modular-toolbar.service
+```
+
+Check the socket:
+
+```sh
+ls -l "$XDG_RUNTIME_DIR/modular-toolbar.sock"
+```
+
+Check extension status:
+
+```sh
+gnome-extensions info modular-toolbar@example.com
+```
+
+`State: ERROR` means the Shell loaded the extension but its JavaScript failed. Capture the real exception with:
+
+```sh
+journalctl -b _COMM=gnome-shell --no-pager \
+  | grep -i -E 'modular-toolbar|TypeError|ReferenceError|SyntaxError|Gio|PanelMenu|enable failed|IPC error'
+```
+
+The extension also logs `panel indicator enabled`, `panel indicator disabled`, and deduplicated IPC errors. If the indicator is enabled but the backend is unavailable, the panel label shows `Toolbar: backend offline`; if there are no enabled profiles, it shows `Toolbar: inactive`.
+
+The installed extension targets GNOME 45–50 and uses ES-module imports; Ubuntu 22.04/GNOME 42–44 needs a separate legacy-import extension port and is not currently supported by the installed extension file.
+
+### Profile shows an error
+
+Inspect only safe fields:
+
+```sh
+sqlite3 -header -column "$HOME/.config/modular-toolbar/toolbar.db" \
+  'SELECT name, enabled, last_success, last_error FROM profiles;'
+```
+
+Common causes:
+
+- Invalid API key.
+- Network connectivity failure.
+- Avalai API authentication failure.
+- Incorrect system time or TLS configuration.
+- The profile is disabled.
+
+The API key is intentionally not printed by the application logs or the safe diagnostic query.
+
+### No profiles are enabled
+
+The panel displays an inactive state until at least one enabled profile exists.
+
+## 17. Reinstall without losing profiles
+
+Run the unified installer/start command again whenever you want to update or reinstall the application:
+
+```sh
+./start.sh
+```
+
+It updates the binary, GNOME extension, settings app, and systemd user service, while preserving:
+
+```text
+~/.config/modular-toolbar/toolbar.db
+```
+
+If the database has no valid enabled profiles, `start.sh` offers to run `add-profile.sh` interactively. If run non-interactively, add a profile afterward with:
+
+```sh
+./add-profile.sh
+```
+
+## 18. Uninstall
+
+Remove the user service, binary, and GNOME extension:
+
+```sh
+make uninstall
+```
+
+Disable the extension explicitly if necessary:
+
+```sh
+gnome-extensions disable modular-toolbar@example.com
+```
+
+The SQLite database and configuration remain at:
+
+```text
+~/.config/modular-toolbar/
+```
+
+Delete them only if you want to remove all saved profiles and cached data:
+
+```sh
+rm -rf "$HOME/.config/modular-toolbar"
+```
+
+## 19. Development loop
+
+After changing Go code:
+
+```sh
+gofmt -w cmd internal modules
+make test
+make build
+```
+
+After changing the extension:
+
+```sh
+./start.sh
+```
+
+`start.sh` disables the installed extension before copying the current source and re-enables it afterward. It preserves the SQLite database. If you copy files manually, use the disable/enable commands above, then log out and back in under Wayland if the Shell still reports stale code.
+
+After changing the settings application:
+
+```sh
+python3 -m py_compile settings/modular-toolbar-settings.py
+./start.sh
+modular-toolbar-settings
+```
+
+After changing the systemd unit:
+
+```sh
+systemctl --user daemon-reload
+systemctl --user restart modular-toolbar.service
+```
+
+## Current limitations
+
+- The current GNOME extension displays compact panel text but does not yet implement the complete odometer-style digit animation.
+- The installed extension targets GNOME 45–50 and uses ES-module imports; Ubuntu 22.04/GNOME 42–44 needs a legacy-import extension port.
+- The settings window currently manages Avalai profiles; advanced refresh and rotation settings remain configurable in SQLite.
+- Profile changes restart the backend service, and the panel extension reads the updated status on its next poll.
